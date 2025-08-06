@@ -83,7 +83,7 @@ export async function getAvailableDates(limit: number = 30): Promise<string[]> {
     const { data: dailyLogs, error } = await supabase
       .from('daily_logs')
       .select('date')
-      .lt('date', todayString)
+      .lte('date', todayString) // Changed from .lt to .lte to include today
       .order('date', { ascending: false })
       .limit(limit);
 
@@ -98,12 +98,11 @@ export async function getAvailableDates(limit: number = 30): Promise<string[]> {
   }
 }
 
-// Get recent quotes (past quotes only)
+// Get recent quotes (past quotes and today's quote)
 export async function getRecentQuotes(limit: number = 10): Promise<Quote[]> {
   try {
     const supabase = getSupabaseClient();
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const todayString = new Date().toISOString().split('T')[0];
     
     const { data: dailyLogs, error } = await supabase
       .from('daily_logs')
@@ -119,7 +118,7 @@ export async function getRecentQuotes(limit: number = 10): Promise<Quote[]> {
           created_at
         )
       `)
-      .lt('date', today.toISOString().split('T')[0])
+      .lte('date', todayString) // Changed from .lt to .lte to include today
       .order('date', { ascending: false })
       .limit(limit);
 
