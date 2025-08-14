@@ -12,8 +12,7 @@
     "test:watch": "jest --watch",
     "lint": "eslint src/ --ext .ts",
     "format": "prettier --write src/",
-    "db:seed": "ts-node src/config/database.ts seed",
-    "health": "ts-node src/health-check.ts"
+    "db:seed": "ts-node src/config/database.ts seed"
   },
   "keywords": [
     "nodejs",
