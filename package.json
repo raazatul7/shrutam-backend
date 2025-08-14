@@ -1,9 +1,8 @@
 {
   "name": "shrutam-backend",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Daily quotes from Indian scriptures powered by AI",
   "main": "dist/app.js",
-  "type": "module",
   "scripts": {
     "build": "tsc",
     "start": "node dist/app.js",
