@@ -230,6 +230,12 @@ export async function generateAndStoreQuote(): Promise<Quote> {
     const supabase = getSupabaseClient();
     const today = new Date().toISOString().split('T')[0];
     
+    if (!today) {
+      throw new Error('Failed to get today\'s date');
+    }
+    
+    console.log(`🕐 Attempting to generate quote for date: ${today}`);
+    
     // Double-check if we already have a quote for today (race condition protection)
     const todayQuote = await getTodayQuote();
     if (todayQuote) {
@@ -238,9 +244,13 @@ export async function generateAndStoreQuote(): Promise<Quote> {
     }
 
     // Generate quote using AI
+    console.log('🤖 Generating quote using AI...');
     const aiQuote: AIGeneratedQuote = await generateQuoteWithAI();
     
-    // Insert the new quote
+    // Create timestamp for 6:00 AM IST on today's date
+    const sixAMIST = get6AMISTTimestamp(today);
+    
+    // Insert the new quote with 6:00 AM IST timestamp
     const { data: newQuote, error: insertError } = await supabase
       .from('quotes')
       .insert({
@@ -248,7 +258,8 @@ export async function generateAndStoreQuote(): Promise<Quote> {
         meaning_hindi: aiQuote.meaning_hindi,
         meaning_english: aiQuote.meaning_english,
         source: aiQuote.source,
-        category: aiQuote.category
+        category: aiQuote.category,
+        created_at: sixAMIST // 6:00 AM IST timestamp
       })
       .select()
       .single();
@@ -257,9 +268,11 @@ export async function generateAndStoreQuote(): Promise<Quote> {
       throw new Error(`Failed to insert quote: ${insertError?.message}`);
     }
 
+    console.log(`✅ Quote inserted with ID: ${newQuote.id} at ${sixAMIST} (6:00 AM IST)`);
+
     // Try to log the quote for today with conflict handling
     try {
-      await logQuoteForToday(newQuote.id);
+      await logQuoteForToday(newQuote.id, sixAMIST);
       console.log(`✅ Successfully generated and logged new quote for ${today}`);
     } catch (logError: any) {
       // If there's a conflict (duplicate date), fetch the existing quote instead
@@ -268,6 +281,7 @@ export async function generateAndStoreQuote(): Promise<Quote> {
         const existingQuote = await getTodayQuote();
         if (existingQuote) {
           // Clean up the unused quote we just created
+          console.log(`🗑️  Cleaning up duplicate quote with ID: ${newQuote.id}`);
           await supabase.from('quotes').delete().eq('id', newQuote.id);
           return existingQuote;
         }
@@ -282,24 +296,59 @@ export async function generateAndStoreQuote(): Promise<Quote> {
   }
 }
 
+// Get 6:00 AM IST timestamp for a given date
+function get6AMISTTimestamp(dateString: string): string {
+  // Parse the date string (YYYY-MM-DD)
+  const parts = dateString.split('-').map(Number);
+  const year = parts[0];
+  const month = parts[1];
+  const day = parts[2];
+  
+  if (!year || !month || !day) {
+    throw new Error('Invalid date format. Expected YYYY-MM-DD');
+  }
+  
+  // Create date object for 6:00 AM IST
+  // IST is UTC+5:30, so 6:00 AM IST = 12:30 AM UTC (previous day)
+  const istDate = new Date(year, month - 1, day, 6, 0, 0, 0);
+  
+  // Convert IST to UTC (subtract 5 hours 30 minutes)
+  const utcDate = new Date(istDate.getTime() - (5.5 * 60 * 60 * 1000));
+  
+  return utcDate.toISOString();
+}
+
 // Log a quote for today's date
-async function logQuoteForToday(quoteId: string): Promise<void> {
+async function logQuoteForToday(quoteId: string, timestamp?: string): Promise<void> {
   try {
     const supabase = getSupabaseClient();
     
     const today = new Date().toISOString().split('T')[0];
+    if (!today) {
+      throw new Error('Failed to get today\'s date');
+    }
+    const logTimestamp = timestamp || get6AMISTTimestamp(today);
     
+    console.log(`📝 Logging quote ${quoteId} for date: ${today} at ${logTimestamp}`);
+    
+    // Use upsert with conflict resolution to prevent duplicates
     const { error } = await supabase
       .from('daily_logs')
       .upsert({
         quote_id: quoteId,
-        date: today
+        date: today,
+        created_at: logTimestamp
+      }, {
+        onConflict: 'date', // If date conflicts, update the quote_id
+        ignoreDuplicates: false
       });
 
     if (error) {
       console.error('Error logging quote for today:', error);
       throw error;
     }
+    
+    console.log(`✅ Successfully logged quote ${quoteId} for ${today}`);
   } catch (error) {
     console.error('Error logging quote for today:', error);
     throw error;

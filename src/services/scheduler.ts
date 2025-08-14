@@ -21,6 +21,8 @@ export function startScheduler(): void {
 // Generate quote for today if it doesn't exist
 async function generateDailyQuote(): Promise<void> {
   try {
+    console.log(`🕐 Current IST time: ${getCurrentISTTime()}`);
+    
     const shouldGenerate = await shouldGenerateQuoteForToday();
     
     if (shouldGenerate) {
@@ -28,7 +30,7 @@ async function generateDailyQuote(): Promise<void> {
       const newQuote = await generateAndStoreQuote();
       console.log(`✅ Generated quote: "${newQuote.shlok.substring(0, 50)}..."`);
     } else {
-      console.log('✅ Quote for today already exists');
+      console.log('✅ Quote for today already exists, skipping generation');
     }
   } catch (error) {
     console.error('❌ Error generating daily quote:', error);
@@ -38,6 +40,8 @@ async function generateDailyQuote(): Promise<void> {
 // Check and generate quote for today on startup
 async function checkAndGenerateTodayQuote(): Promise<void> {
   try {
+    console.log(`🕐 Server startup - Current IST time: ${getCurrentISTTime()}`);
+    
     const shouldGenerate = await shouldGenerateQuoteForToday();
     
     if (shouldGenerate) {
@@ -55,6 +59,7 @@ async function checkAndGenerateTodayQuote(): Promise<void> {
 // Manual quote generation function (for admin use)
 export async function generateQuoteManually(): Promise<void> {
   try {
+    console.log(`🕐 Manual generation requested at: ${getCurrentISTTime()}`);
     console.log('📝 Manually generating new quote...');
     const newQuote = await generateAndStoreQuote();
     console.log(`✅ Manually generated quote: "${newQuote.shlok.substring(0, 50)}..."`);
@@ -71,12 +76,14 @@ export function getSchedulerStatus(): {
   nextRun: string;
   timezone: string;
   description: string;
+  currentTime: string;
 } {
   return {
     isRunning: true,
     nextRun: '06:00 AM (IST)',
     timezone: 'Asia/Kolkata',
-    description: 'Daily quote generation at 6:00 AM IST'
+    description: 'Daily quote generation at 6:00 AM IST',
+    currentTime: getCurrentISTTime()
   };
 }
 
@@ -92,4 +99,19 @@ export function getCurrentISTTime(): string {
     minute: '2-digit',
     second: '2-digit'
   });
+}
+
+// Get current UTC time for debugging
+export function getCurrentUTCTime(): string {
+  return new Date().toISOString();
+}
+
+// Check if scheduler should run (prevent multiple instances)
+let isSchedulerRunning = false;
+export function setSchedulerRunning(status: boolean): void {
+  isSchedulerRunning = status;
+}
+
+export function getSchedulerRunningStatus(): boolean {
+  return isSchedulerRunning;
 } 
