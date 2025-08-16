@@ -45,45 +45,50 @@ async function getRecentlyUsedQuotes(limit: number = 30): Promise<string[]> {
   }
 }
 
+
+
 // AI prompt for generating quotes with random category and uniqueness check
 async function getQuoteGenerationPrompt(): Promise<string> {
   // Use least used category for better variety, with fallback to random
   const category = await getLeastUsedCategory();
-  const recentQuotes = await getRecentlyUsedQuotes(10);
+  
+  // Get only recent quotes to avoid immediate duplicates (much more efficient)
+  const recentQuotes = await getRecentlyUsedQuotes(15);
   
   let uniquenessNote = '';
   if (recentQuotes.length > 0) {
     uniquenessNote = `
-IMPORTANT: Please ensure the generated shlok is completely different from these recently used shloks:
-${recentQuotes.map(quote => `- ${quote}`).join('\n')}
+IMPORTANT: Avoid generating shloks similar to these recently used ones:
+${recentQuotes.map(shlok => `- ${shlok}`).join('\n')}
 
-The new shlok must be unique and not similar to any of the above.
+Generate a completely different and unique shlok.
 `;
   }
   
   return `
-Generate one unique Shlok from any Indian scripture (Bhagavad Gita, Ramayana, Mahabharata, Upanishads, etc.) 
-that relates to the category: ${category}
+Generate one completely unique Shlok from Indian scriptures for category: ${category}
 
 ${uniquenessNote}
 
-Requirements:
-1. The Shlok should be in Sanskrit (Devanagari script)
-2. Provide meaning in Hindi (Devanagari script)
-3. Provide meaning in English (simple, clear translation)
-4. Include the source scripture name
-5. The quote MUST relate to the category: ${category}
-6. The shlok MUST be completely unique and different from any commonly known shloks
-7. Choose from a wide variety of scriptures and verses
+CRITICAL REQUIREMENTS:
+1. The shlok MUST be in proper Sanskrit (Devanagari script)
+2. The shlok MUST be completely unique - choose lesser-known verses
+3. Hindi meaning must be clear and concise (Devanagari script)
+4. English meaning must be clear and concise
+5. Must relate to category: ${category}
+6. Focus on lesser-known verses from various scriptures
+7. RESPOND ONLY WITH VALID JSON - no explanations, no extra text
 
-Example format:
-Shlok: कर्मण्येवाधिकारस्ते मा फलेषु कदाचन
-Meaning Hindi: तुम्हारा अधिकार केवल कर्म करने में है, फल में नहीं।
-Meaning English: You have the right to perform your actions, but never to the fruits of those actions.
-Source: Bhagavad Gita
-Category: ${category}
+Required JSON format:
+{
+  "shlok": "Sanskrit shlok in Devanagari script",
+  "meaning_hindi": "Hindi meaning in Devanagari script",
+  "meaning_english": "Clear English meaning",
+  "source": "Scripture name",
+  "category": "${category}"
+}
 
-Please generate a new, meaningful, and unique quote related to ${category} following this exact format.
+Generate the JSON response now:
 `;
 }
  
@@ -97,7 +102,7 @@ export async function generateQuoteWithAI(): Promise<AIGeneratedQuote> {
       messages: [
         {
           role: 'system',
-          content: 'You are a knowledgeable expert in Indian scriptures and Sanskrit literature. Generate authentic, meaningful, and unique quotes from ancient texts. Always provide different shloks and avoid repetition.'
+          content: 'You are a knowledgeable expert in Indian scriptures and Sanskrit literature. Generate authentic, meaningful, and completely unique quotes from ancient texts. The database has a unique constraint on shloks - never generate duplicate shloks. Always respond with valid JSON only, no explanations or extra text.'
         },
         {
           role: 'user',
@@ -154,11 +159,20 @@ async function generateQuoteWithAIRetry(): Promise<AIGeneratedQuote> {
       messages: [
         {
           role: 'system',
-          content: 'You are a Sanskrit scholar. Generate a completely different and unique shlok from Indian scriptures. Focus on lesser-known verses and ensure uniqueness.'
+          content: 'You are a Sanskrit scholar. Generate a completely unique shlok from Indian scriptures. Focus on lesser-known verses and ensure complete uniqueness. Respond ONLY with valid JSON.'
         },
         {
           role: 'user',
-          content: `Generate a unique shlok about ${category} from any Indian scripture. Make sure it's different from common verses.`
+          content: `Generate a completely unique shlok about ${category} from Indian scriptures. Use lesser-known verses from various scriptures.
+
+RESPOND ONLY WITH VALID JSON:
+{
+  "shlok": "Sanskrit shlok in Devanagari script",
+  "meaning_hindi": "Hindi meaning in Devanagari script", 
+  "meaning_english": "Clear English meaning",
+  "source": "Scripture name",
+  "category": "${category}"
+}`
         }
       ],
       max_tokens: 500,
@@ -173,7 +187,7 @@ async function generateQuoteWithAIRetry(): Promise<AIGeneratedQuote> {
 
     const parsedQuote = parseAIResponse(response);
     
-    // If still not unique, use fallback
+    // If still not unique against recent quotes, use fallback
     const isUnique = await checkQuoteUniqueness(parsedQuote.shlok);
     if (!isUnique) {
       console.log('⚠️  Retry also generated non-unique quote, using fallback');
@@ -187,12 +201,16 @@ async function generateQuoteWithAIRetry(): Promise<AIGeneratedQuote> {
   }
 }
 
-// Check if a quote is unique (not used recently)
+// Check if a quote is unique against recent quotes only (lightweight check)
 async function checkQuoteUniqueness(shlok: string): Promise<boolean> {
   try {
-    const recentQuotes = await getRecentlyUsedQuotes(50);
+    // Only check against recent quotes for basic uniqueness (much more efficient)
+    const recentQuotes = await getRecentlyUsedQuotes(30);
+    
+    // Check for exact matches or very similar shloks in recent quotes only
     return !recentQuotes.some(quote => 
-      quote.toLowerCase().includes(shlok.toLowerCase()) || 
+      quote.toLowerCase().trim() === shlok.toLowerCase().trim() ||
+      quote.toLowerCase().includes(shlok.toLowerCase()) ||
       shlok.toLowerCase().includes(quote.toLowerCase())
     );
   } catch (error) {
@@ -270,45 +288,80 @@ async function getLeastUsedCategory(): Promise<string> {
   }
 }
 
-// Parse AI response to extract quote components
+// Parse AI response to extract quote components (now expects JSON format)
 function parseAIResponse(response: string): AIGeneratedQuote {
   try {
-    // Extract Shlok (Sanskrit verse)
-    const shlokMatch = response.match(/Shlok:\s*([^\n]+)/);
-    const shlok = shlokMatch ? shlokMatch[1]?.trim() || '' : '';
-
-    // Extract Hindi meaning
-    const meaningHindiMatch = response.match(/Meaning Hindi:\s*([^\n]+)/);
-    const meaning_hindi = meaningHindiMatch ? meaningHindiMatch[1]?.trim() || '' : '';
-
-    // Extract English meaning
-    const meaningEnglishMatch = response.match(/Meaning English:\s*([^\n]+)/);
-    const meaning_english = meaningEnglishMatch ? meaningEnglishMatch[1]?.trim() || '' : '';
-
-    // Extract source
-    const sourceMatch = response.match(/Source:\s*([^\n]+)/);
-    const source = sourceMatch ? sourceMatch[1]?.trim() || 'Unknown Scripture' : 'Unknown Scripture';
-
-    // Extract category (optional)
-    const categoryMatch = response.match(/Category:\s*([^\n]+)/);
-    const category = categoryMatch ? categoryMatch[1]?.trim() : undefined;
-
+    // Clean the response - remove any extra text and extract JSON
+    let jsonString = response.trim();
+    
+    // If response contains extra text, try to extract JSON from it
+    const jsonMatch = jsonString.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      jsonString = jsonMatch[0];
+    }
+    
+    // Parse JSON response
+    const parsedResponse = JSON.parse(jsonString);
+    
     // Validate required fields
-    if (!shlok || !meaning_hindi || !meaning_english || !source) {
-      throw new Error('Invalid AI response format');
+    if (!parsedResponse.shlok || !parsedResponse.meaning_hindi || !parsedResponse.meaning_english || !parsedResponse.source) {
+      throw new Error('Invalid AI response format - missing required fields');
     }
 
     return {
-      shlok,
-      meaning_hindi,
-      meaning_english,
-      source,
-      category
+      shlok: parsedResponse.shlok.trim(),
+      meaning_hindi: parsedResponse.meaning_hindi.trim(),
+      meaning_english: parsedResponse.meaning_english.trim(),
+      source: parsedResponse.source.trim(),
+      category: parsedResponse.category?.trim()
     };
   } catch (error) {
     console.error('Error parsing AI response:', error);
-    throw new Error('Failed to parse AI response');
+    console.error('Response was:', response);
+    
+    // If JSON parsing fails, try to fallback to old text format parsing
+    try {
+      return parseTextFormatResponse(response);
+    } catch (fallbackError) {
+      throw new Error('Failed to parse AI response as JSON or text format');
+    }
   }
+}
+
+// Fallback parser for text format responses
+function parseTextFormatResponse(response: string): AIGeneratedQuote {
+  // Extract Shlok (Sanskrit verse)
+  const shlokMatch = response.match(/Shlok:\s*([^\n]+)/);
+  const shlok = shlokMatch ? shlokMatch[1]?.trim() || '' : '';
+
+  // Extract Hindi meaning
+  const meaningHindiMatch = response.match(/Meaning Hindi:\s*([^\n]+)/);
+  const meaning_hindi = meaningHindiMatch ? meaningHindiMatch[1]?.trim() || '' : '';
+
+  // Extract English meaning
+  const meaningEnglishMatch = response.match(/Meaning English:\s*([^\n]+)/);
+  const meaning_english = meaningEnglishMatch ? meaningEnglishMatch[1]?.trim() || '' : '';
+
+  // Extract source
+  const sourceMatch = response.match(/Source:\s*([^\n]+)/);
+  const source = sourceMatch ? sourceMatch[1]?.trim() || 'Unknown Scripture' : 'Unknown Scripture';
+
+  // Extract category (optional)
+  const categoryMatch = response.match(/Category:\s*([^\n]+)/);
+  const category = categoryMatch ? categoryMatch[1]?.trim() : undefined;
+
+  // Validate required fields
+  if (!shlok || !meaning_hindi || !meaning_english || !source) {
+    throw new Error('Invalid text format response');
+  }
+
+  return {
+    shlok,
+    meaning_hindi,
+    meaning_english,
+    source,
+    category
+  };
 }
 
 // Fallback quote when AI fails

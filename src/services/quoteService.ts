@@ -264,8 +264,54 @@ export async function generateAndStoreQuote(): Promise<Quote> {
       .select()
       .single();
 
-    if (insertError || !newQuote) {
-      throw new Error(`Failed to insert quote: ${insertError?.message}`);
+    if (insertError) {
+      // Handle unique constraint violation (duplicate shlok)
+      if (insertError.code === '23505' && insertError.message?.includes('unique_shlok')) {
+        console.log('⚠️  Shlok already exists in database (unique constraint), regenerating...');
+        // Try regenerating once more
+        const newAiQuote = await generateQuoteWithAI();
+        
+        // Attempt insertion again with new quote
+        const { data: retryQuote, error: retryError } = await supabase
+          .from('quotes')
+          .insert({
+            shlok: newAiQuote.shlok,
+            meaning_hindi: newAiQuote.meaning_hindi,
+            meaning_english: newAiQuote.meaning_english,
+            source: newAiQuote.source,
+            category: newAiQuote.category,
+            created_at: sixAMIST
+          })
+          .select()
+          .single();
+          
+        if (retryError) {
+          throw new Error(`Failed to insert quote after retry: ${retryError.message}`);
+        }
+        
+        console.log(`✅ Successfully inserted unique quote after retry: ${retryQuote.id}`);
+        
+        // Try to log the retry quote for today
+        try {
+          await logQuoteForToday(retryQuote.id, sixAMIST);
+          return retryQuote as Quote;
+        } catch (logError: any) {
+          if (logError.message?.includes('duplicate') || logError.code === '23505') {
+            const existingQuote = await getTodayQuote();
+            if (existingQuote) {
+              await supabase.from('quotes').delete().eq('id', retryQuote.id);
+              return existingQuote;
+            }
+          }
+          throw logError;
+        }
+      }
+      
+      throw new Error(`Failed to insert quote: ${insertError.message}`);
+    }
+
+    if (!newQuote) {
+      throw new Error('Failed to insert quote: No data returned');
     }
 
     console.log(`✅ Quote inserted with ID: ${newQuote.id} at ${sixAMIST} (6:00 AM IST)`);
